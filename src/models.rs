@@ -1,4 +1,5 @@
 use crate::pipeline;
+use itertools::Itertools;
 // use fst::{
 //     automaton::{Str, Subsequence, Union},
 //     map::Stream,
@@ -84,10 +85,9 @@ impl Document {
     }
 
     pub fn search(&self, s: &str) -> Vec<String> {
-        let s = s.to_lowercase();
         info!("Provided search data: {}", s);
-        s.unicode_words()
-            .map(|t| self.search_for_term(t))
+        let s = s.to_lowercase().unicode_words().unique();
+        s.map(|t| self.search_for_term(t))
             .filter(|x| x.len() > 0)
             .flatten()
             .collect()
