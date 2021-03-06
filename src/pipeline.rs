@@ -31,7 +31,7 @@ pub fn normalise(data: &str) -> (Dictionary, SentenceArray) {
         .unicode_sentences()
         .map(|x| {
             x.unicode_words()
-                .map(|y| unique_words.get_by_left(y))
+                .map(|y| unique_words.get_by_left(y).unwrap())
                 .collect::<Vec<usize>>()
         })
         .collect();
