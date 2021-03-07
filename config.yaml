@@ -1,4 +1,4 @@
-read_path: data/John Bunyan___The Works of John Bunyan.txt
+read_path: data/*.txt
 search_text:
   |
     "my father was a gipsy and his name was bunyan"
