@@ -1,39 +1,36 @@
 use crate::pipeline;
-use itertools::Itertools;
+use bimap::BiMap;
+use itertools::{Itertools, Unique};
 // use fst::{
 //     automaton::{Str, Subsequence, Union},
 //     map::Stream,
 //     Automaton, IntoStreamer, Map, Streamer,
 // };
-use log::{error, info};
-use std::collections::HashMap;
-use unicode_segmentation::UnicodeSegmentation;
+use log::info;
+use std::fmt::{Display, Formatter};
+use unicode_segmentation::{UnicodeSegmentation, UnicodeWords};
 
-type Dictionary = HashMap<String, usize>;
+type Dictionary = BiMap<String, usize>;
 type SentenceArray = Vec<Vec<usize>>;
 pub struct Document {
     pub name: String,
     pub dictionary: Dictionary,
-    inverse_dict: HashMap<usize, String>,
     sentence_set: SentenceArray,
 }
 
 impl Document {
     pub fn lookup_word(&self, key: &str) -> Option<&usize> {
-        self.dictionary.get(key)
+        self.dictionary.get_by_left(key)
     }
 
     pub fn new(name: impl Into<String>, data: String) -> Self {
         let word_len = data.len();
         info!("Prepping to index {} words", word_len);
         let (dictionary, sentences) = pipeline::normalise(&data);
-        let reverse_dict = dictionary.iter().map(|(s, k)| (*k, s.clone())).collect();
-        info!("Constructed Reverse Dictionary");
         Self {
             name: name.into(),
-            dictionary: dictionary,
+            dictionary,
             sentence_set: sentences,
-            inverse_dict: reverse_dict,
         }
         // let d1: Vec<(String, u64)> = data
         //     .iter()
@@ -62,7 +59,7 @@ impl Document {
     fn key_lookup(&self, id_array: &Vec<usize>) -> String {
         let words: Vec<String> = id_array
             .iter()
-            .map(|idx| &self.inverse_dict[idx])
+            .map(|idx| self.dictionary.get_by_right(idx).unwrap())
             .map(|x| x.to_owned())
             .collect();
         words.join(" ")
@@ -70,7 +67,7 @@ impl Document {
 
     fn search_for_term(&self, s: &str) -> Vec<String> {
         info!("Preparing to perform search on terms: {}", s);
-        if let Some(id) = self.dictionary.get(s) {
+        if let Some(id) = self.dictionary.get_by_left(s) {
             info!("Found search term: ");
             let matching: Vec<String> = self
                 .sentence_set
