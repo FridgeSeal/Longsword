@@ -47,36 +47,6 @@ pub struct Document {
     pub sentence_set: SentenceArray,
 }
 
-impl Index {
-    pub fn new(name: impl Into<String>, data: Vec<Document>) -> Self {
-        let name = name.into();
-        let mut documents = Slab::with_capacity(data.len() * 2);
-        let keys: Vec<usize> = data.into_iter().map(|f| documents.insert(f)).collect();
-        Self {
-            name,
-            documents,
-            keys,
-        }
-    }
-    pub fn search(&self, search_term: &str) -> anyhow::Result<Vec<SearchResult>> {
-        let s_lower = search_term.to_lowercase();
-        let s = s_lower.unicode_words().unique().collect::<Vec<&str>>();
-        let results = self
-            .keys
-            .iter()
-            .map(|k| {
-                let doc: &Document = self.documents.get(*k).unwrap();
-                let srch_res = doc.search(&s);
-                SearchResult {
-                    doc_name: &doc.name,
-                    n_hits: srch_res.len(),
-                    // results: srch_res.iter().take(5).collect::<Vec<&String>>().as_slice(),
-                    results: srch_res.into_iter().take(5).collect(),
-                }
-            })
-            .collect();
-        Ok(results)
-    }
 #[derive(Archive, Debug, Serialize, Deserialize)]
 pub struct TextData {
     pub id: u64,
@@ -84,17 +54,21 @@ pub struct TextData {
     pub text: SentenceArray,
 }
 
-impl Document {
-    pub fn lookup_word(&self, key: &str) -> Option<&usize> {
-        self.dictionary.get_by_left(key)
-    }
+// Want to add the bloom filter functionaity as some kind of trait? So we can write it once and just "attach"
+// the functionality to each one in a nice, composable manner
+//
 
+impl Document {
     pub fn new(name: impl Into<String>, data: String) -> Self {
-        let word_len = data.len();
         let (dictionary, sentences) = pipeline::normalise(&data);
+        let mut p_filter = CuckooFilter::new();
+        dictionary
+            .iter()
+            .for_each(|(x, _)| p_filter.add(x).unwrap());
         Self {
             name: name.into(),
             dictionary,
+            p_filter,
             sentence_set: sentences,
         }
     }
@@ -123,11 +97,63 @@ impl Document {
     }
 
     pub fn search(&self, s: &[&str]) -> Vec<String> {
+        info!("Preparing to perform search on terms: {:?}", s);
         s.iter()
             .map(|t| self.search_for_term(t))
             .filter(|x| x.len() > 0)
             .flatten()
             .collect()
     }
+}
 
+impl Index {
+    pub fn new(name: impl Into<String>, data: Vec<Document>) -> Self {
+        let name = name.into();
+        let mut documents = Slab::with_capacity(data.len() * 2);
+        let keys: Vec<usize> = data.into_iter().map(|f| documents.insert(f)).collect();
+        let mut p_filter = CuckooFilter::with_capacity(800_000);
+        documents
+            .iter()
+            .map(|(_, f)| f.dictionary.left_values())
+            .flatten()
+            .for_each(|g| {
+                let cuckoo_insert = p_filter.add(g);
+                match cuckoo_insert {
+                    Ok(_) => (),
+                    Err(_) => log::warn!(
+                        "Reached max capacity in Cuckoo filter, something is being ejected"
+                    ),
+                }
+            });
+        Self {
+            name,
+            p_filter,
+            documents,
+            keys,
+        }
+    }
+
+    fn pre_filter(&self, terms: &[&str]) -> bool {
+        terms.iter().any(|&f| self.p_filter.contains(f))
+    }
+
+    pub fn search(&self, search_term: &str) -> anyhow::Result<Vec<SearchResult>> {
+        let s_lower = search_term.to_lowercase();
+        let s = s_lower.unicode_words().unique().collect::<Vec<&str>>();
+        let results = self
+            .keys
+            .iter()
+            .map(|k| self.documents.get(*k).unwrap())
+            .filter(|f| s.iter().any(|&y| f.p_filter.contains(y)))
+            .map(|doc| {
+                let srch_res = doc.search(&s);
+                SearchResult {
+                    doc_name: &doc.name,
+                    n_hits: srch_res.len(),
+                    results: srch_res.into_iter().take(5).collect(),
+                }
+            })
+            .collect();
+        Ok(results)
+    }
 }
