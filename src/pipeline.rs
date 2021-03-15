@@ -6,18 +6,6 @@ type Dictionary = BiMap<String, usize>; // BiMap
 type SentenceArray = Vec<Vec<usize>>;
 
 pub fn normalise(data: &str) -> (Dictionary, SentenceArray) {
-    // let stemmer = Stemmer::create(Algorithm::English);
-    // let sw: HashSet<_> = Spark::stopwords(Language::English)
-    //     .unwrap()
-    //     .iter()
-    //     .collect();
-    // let unique_words: HashSet<String> = data
-    //     .to_lowercase()
-    //     .unicode_words()
-    //     .map(|x| stemmer.stem(x))
-    //     .filter(|x| !sw.contains(&x.deref()))
-    //     .map(|y| y.to_string())
-    //     .collect();
     let data = data.to_lowercase();
     let unique_words: BiMap<String, usize> = data
         .unicode_words()
@@ -38,13 +26,3 @@ pub fn normalise(data: &str) -> (Dictionary, SentenceArray) {
     // TODO: turn the inner "sentences" into Compressed Vectors
     (unique_words, sentences)
 }
-
-// fn main() {
-//     let stops: HashSet<_> = Spark::stopwords(Language::English)
-//         .unwrap()
-//         .iter()
-//         .collect();
-//     let mut tokens = vec!["brocolli", "is", "good", "to", "eat"];
-//     tokens.retain(|s| !stops.contains(s));
-//     assert_eq!(tokens, vec!("brocolli", "good", "eat"));
-// }
