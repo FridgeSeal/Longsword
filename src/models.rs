@@ -91,7 +91,6 @@ impl Document {
 
     pub fn new(name: impl Into<String>, data: String) -> Self {
         let word_len = data.len();
-        info!("Prepping to index {} words", word_len);
         let (dictionary, sentences) = pipeline::normalise(&data);
         Self {
             name: name.into(),
@@ -110,9 +109,7 @@ impl Document {
     }
 
     fn search_for_term(&self, s: &str) -> Vec<String> {
-        info!("Preparing to perform search on terms: {}", s);
         if let Some(id) = self.dictionary.get_by_left(s) {
-            info!("Found search term: ");
             let matching: Vec<String> = self
                 .sentence_set
                 .iter()
