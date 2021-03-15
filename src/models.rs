@@ -97,28 +97,6 @@ impl Document {
             dictionary,
             sentence_set: sentences,
         }
-        // let d1: Vec<(String, u64)> = data
-        //     .iter()
-        //     .zip(1..word_len)
-        //     .map(|(x, y)| (x.to_string(), y as u64))
-        //     .collect();
-        // let d2 = d1.clone();
-        // info!("Constructed word arrays");
-        // let forward_dict = Map::from_iter(d1).expect("Failed to create forward dictionary");
-        // info!("Constructed Forward Dictionary");
-        // let reverse_dict = d2.iter().map(|(s, k)| (*k, s.clone())).collect();
-        // info!("Constructed Reverse Dictionary");
-        // Self {
-        //     name: name.into(),
-        //     dictionary: forward_dict,
-        //     reverse_dictionary: reverse_dict,
-        //     stemmer: Stemmer::create(Algorithm::English),
-        //     stopwords: Spark::stopwords(Language::English)
-        //         .expect("Failed to instantiate stopwords")
-        //         .into_iter()
-        //         .map(|&x| x.to_string())
-        //         .collect(),
-        // }
     }
 
     fn key_lookup(&self, id_array: &Vec<usize>) -> String {
@@ -154,31 +132,4 @@ impl Document {
             .collect()
     }
 
-    //     let s2 = s
-    //         .to_lowercase()
-    //         .unicode_words()
-    //         .map(|x| self.stemmer.stem(x))
-    //         .map(|y| y.to_string())
-    //         .filter(|x| !self.stopwords.contains(x))
-    //         .collect::<Vec<String>>();
-    //     info!("Search terms normalised: {:#?}", s2);
-    //     let aut_set = s2
-    //         .iter()
-    //         .map(|x| Subsequence::new(&x).union(fst::automaton::Str::new(&x)))
-    //         .collect::<Vec<Union<Subsequence, Str>>>();
-    //     info!("Automaton created");
-    //     let keys = aut_set
-    //         .iter()
-    //         .filter_map(|aut| {
-    //             self.dictionary
-    //                 .search(&aut)
-    //                 .into_stream()
-    //                 .into_str_keys()
-    //                 .ok()
-    //         })
-    //         .flatten()
-    //         .collect::<Vec<String>>();
-    //     info!("Search performed!");
-    //     keys
-    // }
 }
