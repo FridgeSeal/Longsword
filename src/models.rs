@@ -1,15 +1,15 @@
 use crate::pipeline;
 use bimap::BiMap;
-use itertools::{Itertools, Unique};
-use slab::Slab;
-// use fst::{
-//     automaton::{Str, Subsequence, Union},
-//     map::Stream,
-//     Automaton, IntoStreamer, Map, Streamer,
-// };
+use cuckoofilter::{self, CuckooFilter};
+use itertools::Itertools;
 use log::info;
-use std::fmt::{Display, Formatter};
-use unicode_segmentation::{UnicodeSegmentation, UnicodeWords};
+use rkyv::{Archive, Deserialize, Serialize};
+use slab::Slab;
+use std::{
+    collections::hash_map::DefaultHasher,
+    fmt::{Display, Formatter},
+};
+use unicode_segmentation::UnicodeSegmentation;
 
 type Dictionary = BiMap<String, usize>;
 type SentenceArray = Vec<Vec<usize>>;
