@@ -36,9 +36,9 @@ pub struct Index {
     name: String,
     // config: ????
     // statistics: Polars df
-    // bloom_filter:
-    documents: Slab<Document>,
-    keys: Vec<usize>,
+    p_filter: CuckooFilter<DefaultHasher>,
+    pub documents: Slab<Document>,
+    pub keys: Vec<usize>,
 }
 pub struct Document {
     pub name: String,
@@ -76,6 +76,11 @@ impl Index {
             .collect();
         Ok(results)
     }
+#[derive(Archive, Debug, Serialize, Deserialize)]
+pub struct TextData {
+    pub id: u64,
+    pub name: String,
+    pub text: SentenceArray,
 }
 
 impl Document {
