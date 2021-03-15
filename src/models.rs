@@ -43,7 +43,8 @@ pub struct Index {
 pub struct Document {
     pub name: String,
     pub dictionary: Dictionary,
-    sentence_set: SentenceArray,
+    pub p_filter: CuckooFilter<DefaultHasher>,
+    pub sentence_set: SentenceArray,
 }
 
 impl Index {
