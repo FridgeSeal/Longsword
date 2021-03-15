@@ -14,7 +14,6 @@ pub fn normalise(data: &str) -> (Dictionary, SentenceArray) {
         .enumerate()
         .map(|(idx, val)| (val.to_string(), idx))
         .collect();
-    // HashMap<&str, usize> = a.unicode_words().into_iter().unique().enumerate().map(|(idx, val)| (val, idx)).collect();
     let sentences: Vec<Vec<usize>> = data
         .unicode_sentences()
         .map(|x| {
