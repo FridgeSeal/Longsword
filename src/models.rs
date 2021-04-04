@@ -1,159 +1,172 @@
-use crate::pipeline;
-use bimap::BiMap;
-use cuckoofilter::{self, CuckooFilter};
+use anyhow::Result;
 use itertools::Itertools;
-use log::info;
-use rkyv::{Archive, Deserialize, Serialize};
-use slab::Slab;
+use log;
+use logging_timer::{stime, time};
+use rust_stemmers::{Algorithm, Stemmer};
+use serde::Deserialize;
 use std::{
-    collections::hash_map::DefaultHasher,
-    fmt::{Display, Formatter},
+    collections::{HashMap, HashSet},
+    convert::From,
+    fmt::Display,
+    u64,
 };
+use stop_words;
 use unicode_segmentation::UnicodeSegmentation;
+use xxhash_rust::xxh3::xxh3_64;
 
-type Dictionary = BiMap<String, usize>;
-type SentenceArray = Vec<Vec<usize>>;
-
-#[derive(Debug)]
-pub struct SearchResult<'a> {
-    pub doc_name: &'a str,
-    pub n_hits: usize,
-    // pub results: &'a [&'a String],
-    pub results: Vec<String>,
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct RawDoc {
+    pub title: String,
+    #[serde(rename = "abstract")]
+    pub txt_abstract: String,
+    pub url: String,
 }
 
-impl Display for SearchResult<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct Feed {
+    pub doc: Vec<RawDoc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Document {
+    pub id: u64,
+    pub title: String,
+    pub txt_abstract: String,
+    pub url: String,
+}
+
+impl From<RawDoc> for Document {
+    fn from(base: RawDoc) -> Self {
+        Document {
+            id: xxh3_64(&base.title.as_bytes()),
+            title: base.title,
+            txt_abstract: base.txt_abstract,
+            url: base.url,
+        }
+    }
+}
+
+impl Display for Document {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Document name: {}\nNumber of occurrences: {}\nSamples: {:#?}",
-            self.doc_name, self.n_hits, self.results
+            "document id: {}\ndocument name: {}\ntext:{}\n",
+            self.id, self.title, self.txt_abstract
         )
     }
 }
-
+// #[derive(Debug)]
 pub struct Index {
-    name: String,
-    // config: ????
-    // statistics: Polars df
-    p_filter: CuckooFilter<DefaultHasher>,
-    pub documents: Slab<Document>,
-    pub keys: Vec<usize>,
-}
-pub struct Document {
-    pub name: String,
-    pub dictionary: Dictionary,
-    pub p_filter: CuckooFilter<DefaultHasher>,
-    pub sentence_set: SentenceArray,
+    docs: HashMap<u64, Document>, // Re-add thins once we care about it
+    stopwords: HashSet<String>,
+    stem_fn: Stemmer,
+    pub inverted: HashMap<String, HashSet<u64>>,
 }
 
-#[derive(Archive, Debug, Serialize, Deserialize)]
-pub struct TextData {
-    pub id: u64,
-    pub name: String,
-    pub text: SentenceArray,
+pub struct SearchResult<'a> {
+    pub docs: Vec<&'a Document>,
+    // pub meta: SearchMeta
 }
 
-// Want to add the bloom filter functionaity as some kind of trait? So we can write it once and just "attach"
-// the functionality to each one in a nice, composable manner
-//
-
-impl Document {
-    pub fn new(name: impl Into<String>, data: String) -> Self {
-        let (dictionary, sentences) = pipeline::normalise(&data);
-        let mut p_filter = CuckooFilter::new();
-        dictionary
-            .iter()
-            .for_each(|(x, _)| p_filter.add(x).unwrap());
-        Self {
-            name: name.into(),
-            dictionary,
-            p_filter,
-            sentence_set: sentences,
-        }
+impl<'a> From<Vec<&'a Document>> for SearchResult<'a> {
+    fn from(src: Vec<&'a Document>) -> Self {
+        SearchResult { docs: src }
     }
+}
 
-    fn key_lookup(&self, id_array: &Vec<usize>) -> String {
-        let words: Vec<String> = id_array
-            .iter()
-            .map(|idx| self.dictionary.get_by_right(idx).unwrap())
-            .map(|x| x.to_owned())
-            .collect();
-        words.join(" ")
+impl<'a> From<Vec<Option<&'a Document>>> for SearchResult<'a> {
+    fn from(src: Vec<Option<&'a Document>>) -> Self {
+        src.iter()
+            .filter(|&f| f.is_some())
+            .map(|d| d.unwrap())
+            .collect_vec()
+            .into()
     }
+}
 
-    fn search_for_term(&self, s: &str) -> Vec<String> {
-        if let Some(id) = self.dictionary.get_by_left(s) {
-            let matching: Vec<String> = self
-                .sentence_set
-                .iter()
-                .filter(|&x| x.contains(id))
-                .map(|y| self.key_lookup(y))
-                .collect();
-            matching
-        } else {
-            vec![]
-        }
-    }
-
-    pub fn search(&self, s: &[&str]) -> Vec<String> {
-        info!("Preparing to perform search on terms: {:?}", s);
-        s.iter()
-            .map(|t| self.search_for_term(t))
-            .filter(|x| x.len() > 0)
-            .flatten()
-            .collect()
+impl Display for SearchResult<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let fmt_strs = self.docs.iter().map(|f| format!("{}", f)).join("\n");
+        write!(f, "{}", fmt_strs)
     }
 }
 
 impl Index {
-    pub fn new(name: impl Into<String>, data: Vec<Document>) -> Self {
-        let name = name.into();
-        let mut documents = Slab::with_capacity(data.len() * 2);
-        let keys: Vec<usize> = data.into_iter().map(|f| documents.insert(f)).collect();
-        let mut p_filter = CuckooFilter::with_capacity(800_000);
-        documents
-            .iter()
-            .map(|(_, f)| f.dictionary.left_values())
-            .flatten()
-            .for_each(|g| {
-                let cuckoo_insert = p_filter.add(g);
-                match cuckoo_insert {
-                    Ok(_) => (),
-                    Err(_) => log::warn!(
-                        "Reached max capacity in Cuckoo filter, something is being ejected"
-                    ),
-                }
-            });
-        Self {
-            name,
-            p_filter,
-            documents,
-            keys,
+    pub fn new() -> Self {
+        Index {
+            docs: HashMap::new(),
+            stopwords: stop_words::get(stop_words::LANGUAGE::English)
+                .into_iter()
+                .collect(),
+            stem_fn: Stemmer::create(Algorithm::English),
+            inverted: HashMap::new(),
         }
     }
 
-    fn pre_filter(&self, terms: &[&str]) -> bool {
-        terms.iter().any(|&f| self.p_filter.contains(f))
+    #[inline]
+    pub fn tokenise(&self, text: &str) -> Vec<String> {
+        text.to_lowercase()
+            .unicode_words()
+            .filter(|&f| !self.stopwords.contains(f))
+            .map(|x| self.stem_fn.stem(x))
+            .map(|y| y.to_string())
+            .collect()
     }
 
-    pub fn search(&self, search_term: &str) -> anyhow::Result<Vec<SearchResult>> {
-        let s_lower = search_term.to_lowercase();
-        let s = s_lower.unicode_words().unique().collect::<Vec<&str>>();
-        let results = self
-            .keys
+    pub fn insert<'a>(&'a mut self, doc: Document) -> Result<()> {
+        self.docs.insert(doc.id, doc.clone());
+        let mut tokens_title = self.tokenise(&doc.title);
+        let mut tokens = self.tokenise(&doc.txt_abstract);
+        tokens.append(&mut tokens_title);
+        for token in tokens.into_iter().unique() {
+            let occurrences = self.inverted.entry(token).or_insert({
+                let mut a = HashSet::new();
+                a.insert(doc.id);
+                a
+            });
+            if !occurrences.contains(&doc.id) {
+                occurrences.insert(doc.id);
+            };
+        }
+        Ok(())
+    }
+
+    #[time]
+    pub fn search(&self, s: &str) -> SearchResult {
+        let search_tokens = self.tokenise(s.into());
+        // log::info!("Tokens: {:?}", search_tokens);
+        let results: Vec<&HashSet<u64>> = search_tokens
             .iter()
-            .map(|k| self.documents.get(*k).unwrap())
-            .filter(|f| s.iter().any(|&y| f.p_filter.contains(y)))
-            .map(|doc| {
-                let srch_res = doc.search(&s);
-                SearchResult {
-                    doc_name: &doc.name,
-                    n_hits: srch_res.len(),
-                    results: srch_res.into_iter().take(5).collect(),
-                }
-            })
-            .collect();
-        Ok(results)
+            .map(|t| self.inverted.get(t))
+            .filter(|f| f.is_some())
+            .map(|t| t.unwrap())
+            .collect_vec();
+        // log::info!("n results found from raw tokens: {}", results.len());
+        let isect_ids = self.perform_intersection(results);
+        // log::info!("Intersection complete");
+        dbg!(&isect_ids);
+        isect_ids
+            .iter()
+            .map(|id| self.docs.get(&id))
+            .collect_vec()
+            .into()
+    }
+
+    #[time]
+    fn perform_intersection(&self, values: Vec<&HashSet<u64>>) -> Vec<u64> {
+        let res: Vec<u64>;
+        if let Some((head, tail)) = values.split_first() {
+            let first = head.to_owned().to_owned();
+            let mut all_sets = tail.iter();
+            dbg!(&first, &all_sets);
+            res = first
+                .iter()
+                .filter(|&k| all_sets.all(|s| s.contains(k)))
+                .map(|x| x.to_owned())
+                .collect_vec();
+        } else {
+            res = Vec::new();
+        }
+        res
     }
 }
